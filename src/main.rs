@@ -18,7 +18,7 @@ fn main() {
     activation1.forward(&dense1.output);
     dense2.forward(&activation1.output);
     activation2.forward(&dense2.output);
-    let loss = Loss::calculate(&activation2.output, inputs.1);
+    let loss = Loss::forward(&activation2.output, inputs.1);
     let accuracy = Accuracy::calculate(&activation2.output, inputs.1);
     
     println!("{:?}", loss);

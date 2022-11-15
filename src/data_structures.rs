@@ -77,14 +77,19 @@ impl Accuracy {
 }
 
 pub struct Loss {
+    dinputs: Vec<f64>,
 }
 
 impl Loss {
-    pub fn calculate(output: &Vec<f64>, index: usize) -> f64 {
+    pub fn forward(output: &Vec<f64>, index: usize) -> f64 {
         // clipping to prevent exploding
         let prediction = output[index].max(0.00000001).min(1.0-0.00000001);
         let loss = -(prediction.ln());
         loss
+    }
+
+    pub fn backward(&mut self, dvalue: f64, y_true: Vec<f64>) {
+        self.dinputs = y_true.iter().map(|x| -x * dvalue).collect();
     }
 }
 
