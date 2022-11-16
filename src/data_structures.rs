@@ -2,15 +2,54 @@ use rand::{thread_rng, Rng, distributions::Uniform};
 
 pub struct NeuralNetwork {
     pub layers: Vec<Layer>,
+    pub loss: f64,
 }
 
 impl NeuralNetwork {
-    pub fn forward(&mut self, inputs: &Vec<f64>) {
+    pub fn forward(&mut self, inputs: &Vec<f64>) -> Vec<f64> {
         let mut inp = inputs.clone();
         for layer in self.layers.iter_mut() {
             layer.forward(&inp);
             inp = layer.activation.output();
         }
+        inp
+    }
+
+    pub fn train(&mut self, inputs: &Vec<Vec<f64>>, expected_answers: &Vec<usize>, batch_size: usize, learning_rate: f64) {
+        // let batches: Vec<Vec<Vec<f64>>> = inputs.chunks(batch_size).map(|x| x.to_vec()).collect();
+
+        // for batch in batches {
+            
+        // }
+        for (input, expected_answer) in inputs.iter().zip(expected_answers.iter()) {
+            self.forward(input);
+            let one_hot_answers = match expected_answer {
+                0 => vec![1., 0.],
+                1 => vec![0., 1.],
+                _ => panic!(),
+            };
+            let mut loss_struct = Loss { dinputs: vec![] };
+            let loss = Loss::forward(&self.layers.last().unwrap().activation.output(), *expected_answer);
+            loss_struct.backward(loss, one_hot_answers);
+            let mut dinputs = loss_struct.dinputs;
+            for layer in self.layers.iter_mut().rev() {
+                layer.train(&dinputs, learning_rate);
+                dinputs = layer.neurons.dinputs.clone();
+            }
+            self.loss = loss;
+        }
+    }
+
+    pub fn evaluate(&mut self, inputs: &Vec<Vec<f64>>, expected_answers: &Vec<usize>) {
+        let mut accuracies = vec![];
+        for (input, answer) in inputs.iter().zip(expected_answers.iter()) {
+            let predictions = self.forward(input);
+            let accuracy = Accuracy::calculate(&predictions, *answer);
+            println!("Evalution accuracy: {}", accuracy);
+            accuracies.push(accuracy);
+        }
+        let accuracy: f64 = accuracies.iter().sum::<f64>() / accuracies.len() as f64;
+        println!("Average accuracy: {}", accuracy);
     }
 }
 
@@ -23,6 +62,18 @@ impl Layer {
     pub fn forward(&mut self, inputs: &Vec<f64>) {
         self.neurons.forward(inputs);
         self.activation.forward(&self.neurons.output);
+    }
+
+    pub fn train(&mut self, dvalues: &Vec<f64>, learning_rate: f64) {
+        self.activation.backward(dvalues);
+        self.neurons.backward(&self.activation.output());
+        self.neurons.weights = self.neurons.weights.iter().zip(self.neurons.dweights.iter()).map(
+            |(ws, dws)|
+                ws.iter().zip(dws.iter()).map(|(w, dw)|
+                    w * dw * learning_rate
+            ).collect()
+        ).collect();
+        self.neurons.biases = self.neurons.biases.iter().zip(self.neurons.dbiases.iter()).map(|(b, db)| b * db * learning_rate).collect();
     }
 }
 
@@ -120,17 +171,22 @@ impl Activation for ActivationReLu {
 }
 
 pub struct ActivationSoftMax {
+    pub inputs: Vec<f64>,
     pub output: Vec<f64>,
+    pub dinputs: Vec<f64>,
 }
 
 impl Activation for ActivationSoftMax {
     fn new() -> Self {
         Self {
+            inputs: vec![],
             output: vec![],
+            dinputs: vec![],
         }
     }
 
     fn forward(&mut self, inputs: &Vec<f64>) {
+        self.inputs = inputs.clone();
         let max = inputs.iter().copied().reduce(f64::max).unwrap();
         let tiny_vals: Vec<f64> = inputs.iter().map(|x| x-max).collect();
         let exp_outputs: Vec<f64> = tiny_vals.iter().map(|x| x.exp()).collect();
@@ -140,7 +196,16 @@ impl Activation for ActivationSoftMax {
     }
 
     fn backward(&mut self, dvalues: &Vec<f64>) {
-        
+        self.dinputs = dvalues.iter().zip(self.output.iter()).enumerate().map(
+            |(prediction_index, (dvalue, prediction))| self.inputs.iter().enumerate().map(
+                |(actual_index, _raw_prediction)|
+                    if prediction_index == actual_index {
+                        prediction * (1.0 - prediction)
+                    } else {
+                        -(self.output[prediction_index] * prediction)
+                    } * dvalue
+            ).sum()
+        ).collect();
     }
 }
 
@@ -154,6 +219,20 @@ impl Activations {
         match self {
             Activations::ReLu(relu) => relu.forward(inputs),
             Activations::SoftMax(softmax) => softmax.forward(inputs),
+        }
+    }
+
+    pub fn backward(&mut self, dvalues: &Vec<f64>) {
+        match self {
+            Activations::ReLu(relu) => relu.backward(dvalues),
+            Activations::SoftMax(softmax) => softmax.backward(dvalues),
+        }
+    }
+
+    pub fn dinputs(&mut self) -> Vec<f64> {
+        match self {
+            Activations::ReLu(relu) => relu.dinputs.clone(),
+            Activations::SoftMax(softmax) => softmax.dinputs.clone(),
         }
     }
 
